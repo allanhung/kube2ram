@@ -1,7 +1,16 @@
-FROM alpine:3.9
+FROM golang:1.16.0 AS build
+ENV ARCH=linux
+ENV CGO_ENABLED=0
+RUN mkdir -p /go/src/github.com/AliyunContainerService
+RUN cd /go/src/github.com/AliyunContainerService && git clone -b go-mod https://github.com/allanhung/kube2ram
+WORKDIR /go/src/github.com/AliyunContainerService/kube2ram
+RUN go mod tidy
+RUN go build -o kube2ram cmd/main.go
+
+FROM alpine:3.12.1
 RUN apk --no-cache add \
     ca-certificates \
     tzdata \
     iptables
-ADD build/bin/linux/kube2ram /bin/kube2ram
-ENTRYPOINT ["kube2ram"]
+COPY --from=build /go/src/github.com/AliyunContainerService/kube2ram/kube2ram /bin/kube2ram
+ENTRYPOINT ["/bin/kube2ram"]

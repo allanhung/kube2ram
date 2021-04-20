@@ -37,6 +37,7 @@ const (
 	defaultMaxInterval                = 1 * time.Second
 	defaultMetadataAddress            = "100.100.100.200"
 	defaultNamespaceKey               = "ram.aliyuncs.com/allowed-roles"
+	defaultResolveDupIPs              = false
 	defaultNamespaceRestrictionFormat = "glob"
 	healthcheckInterval               = 30 * time.Second
 )
@@ -63,6 +64,7 @@ type Server struct {
 	LogLevel                   string
 	LogFormat                  string
 	NamespaceRestrictionFormat string
+	ResolveDupIPs              bool
 	UseRegionalStsEndpoint     bool
 	AddIPTablesRule            bool
 	AutoDiscoverBaseArn        bool
@@ -342,7 +344,7 @@ func write(logger *log.Entry, w http.ResponseWriter, s string) {
 
 // Run runs the specified Server.
 func (s *Server) Run(host, token, nodeName string, insecure bool, accessKey, accessSecret string) error {
-	k, err := k8s.NewClient(host, token, nodeName, insecure)
+	k, err := k8s.NewClient(host, token, nodeName, insecure, s.ResolveDupIPs)
 	if err != nil {
 		return err
 	}
@@ -421,6 +423,7 @@ func NewServer() *Server {
 		LogFormat:                  defaultLogFormat,
 		MetadataAddress:            defaultMetadataAddress,
 		NamespaceKey:               defaultNamespaceKey,
+		ResolveDupIPs:              defaultResolveDupIPs,
 		NamespaceRestrictionFormat: defaultNamespaceRestrictionFormat,
 		HealthcheckFailReason:      "Healthcheck not yet performed",
 		RAMRoleSessionTTL:          defaultRAMRoleSessionTTL,

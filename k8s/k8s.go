@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/AliyunContainerService/kube2ram"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	selector "k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
-	selector "k8s.io/client-go/pkg/fields"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 )
@@ -23,11 +24,12 @@ const (
 // Client represents a kubernetes client.
 type Client struct {
 	*kubernetes.Clientset
-	namespaceController *cache.Controller
+	namespaceController cache.Controller
 	namespaceIndexer    cache.Indexer
-	podController       *cache.Controller
+	podController       cache.Controller
 	podIndexer          cache.Indexer
 	nodeName            string
+	resolveDupIPs       bool
 }
 
 // Returns a cache.ListWatch that gets all changes to pods.
@@ -100,12 +102,34 @@ func (k8s *Client) PodByIP(IP string) (*v1.Pod, error) {
 		return pods[0].(*v1.Pod), nil
 	}
 
-	//This happens with `hostNetwork: true` pods
-	podNames := make([]string, len(pods))
-	for i, pod := range pods {
-		podNames[i] = pod.(*v1.Pod).ObjectMeta.Name
+	if !k8s.resolveDupIPs {
+		podNames := make([]string, len(pods))
+		for i, pod := range pods {
+			podNames[i] = pod.(*v1.Pod).ObjectMeta.Name
+		}
+		return nil, fmt.Errorf("%d pods (%v) with the ip %s indexed", len(pods), podNames, IP)
 	}
-	return nil, fmt.Errorf("%d pods (%v) with the ip %s indexed", len(pods), podNames, IP)
+	pod, err := resolveDuplicatedIP(k8s, IP)
+	if err != nil {
+		return nil, err
+	}
+	return pod, nil
+}
+
+func resolveDuplicatedIP(k8s *Client, IP string) (*v1.Pod, error) {
+	runningPodList, err := k8s.CoreV1().Pods("").List(metav1.ListOptions{
+		FieldSelector: selector.OneTermEqualSelector("status.podIP", IP).String(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolveDuplicatedIP: Error retriving the pod with IP %s from the k8s api", IP)
+	}
+	for _, pod := range runningPodList.Items {
+		if !pod.Spec.HostNetwork && string(pod.Status.Phase) == "Running" {
+			return &pod, nil
+		}
+	}
+	error := fmt.Errorf("more than a pod with the same IP has been indexed, this can happen when pods have hostNetwork: true")
+	return nil, error
 }
 
 // NamespaceByName retrieves a namespace by it's given name.
@@ -124,14 +148,16 @@ func (k8s *Client) NamespaceByName(namespaceName string) (*v1.Namespace, error) 
 }
 
 // NewClient returns a new kubernetes client.
-func NewClient(host, token, nodeName string, insecure bool) (*Client, error) {
+func NewClient(host, token, nodeName string, insecure, resolveDupIPs bool) (*Client, error) {
 	var config *rest.Config
 	var err error
 	if host != "" && token != "" {
 		config = &rest.Config{
 			Host:        host,
 			BearerToken: token,
-			Insecure:    insecure,
+			TLSClientConfig: rest.TLSClientConfig{
+				Insecure: insecure,
+			},
 		}
 	} else {
 		config, err = rest.InClusterConfig()
@@ -143,5 +169,5 @@ func NewClient(host, token, nodeName string, insecure bool) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Clientset: client, nodeName: nodeName}, nil
+	return &Client{Clientset: client, nodeName: nodeName, resolveDupIPs: resolveDupIPs}, nil
 }
