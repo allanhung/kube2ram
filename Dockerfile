@@ -5,6 +5,9 @@ ENV GOARCH=amd64
 ENV GOPATH=/go
 RUN go get -d -u github.com/AliyunContainerService/kube2ram
 WORKDIR /go/src/github.com/AliyunContainerService/kube2ram
+RUN rm -rf vendor/golang.org/x/net/http2
+RUN go get -d -u golang.org/x/net || echo "downloaded"
+RUN go get -d -u golang.org/x/text
 RUN go build -o kube2ram cmd/main.go
 
 FROM alpine:3.9
